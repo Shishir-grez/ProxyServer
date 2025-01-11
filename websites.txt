@@ -1,0 +1,6 @@
+Since the request parser used here only works for HTTP 1.1
+These are the websites you could experiment with 
+1. https://www.cs.princeton.edu/
+2. http://httpforever.com/
+
+with the rest of these websites it would give parsing error

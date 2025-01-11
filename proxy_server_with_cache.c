@@ -18,8 +18,8 @@
 
 #define MAX_BYTES 4096                  // max allowed size of request/response
 #define MAX_CLIENTS 400                 // max number of client requests served at a time
-#define MAX_SIZE 200 * (1 << 20)        // size of the cache
-#define MAX_ELEMENT_SIZE 10 * (1 << 20) // max size of an element in cache
+#define MAX_SIZE 200 * (1 << 20)        // size of the cache 200MB
+#define MAX_ELEMENT_SIZE 10 * (1 << 20) // max size of an element in cache 10 mb
 
 typedef struct cache_element cache_element;
 
@@ -193,7 +193,7 @@ int handle_request(int clientSocket, ParsedRequest *request, char *tempReq)
     {
         bytes_send = send(clientSocket, buf, bytes_send, 0);
 
-        for (int i = 0; i < bytes_send / sizeof(char); i++)
+        for (int i = 0; i < int(bytes_send / sizeof(char)); i++)
         {
             temp_buffer[temp_buffer_index] = buf[i];
             // printf("%c",buf[i]); // Response Printing
@@ -241,7 +241,6 @@ int checkHTTPversion(char *msg)
 
 void *thread_fn(void *socketNew)
 {
-    // socket represents clint
     sem_wait(&seamaphore);
     int p;
     sem_getvalue(&seamaphore, &p);
@@ -250,13 +249,10 @@ void *thread_fn(void *socketNew)
     int socket = *t;            // Socket is socket descriptor of the connected Client
     int bytes_send_client, len; // Bytes Transferred
 
-    // This part of code stores http headers in to buffer which ends with "\r\n\r\n" purpose of using the while loop is to ensure that the entire header is captured , size of http 1 header is 4kb, sometimes the recv function may not recieve the entire data
-
     char *buffer = (char *)calloc(MAX_BYTES, sizeof(char)); // Creating buffer of 4kb for a client
 
     bzero(buffer, MAX_BYTES);                               // Making buffer zero
     bytes_send_client = recv(socket, buffer, MAX_BYTES, 0); // Receiving the Request of client by proxy server
-    // recv function can recieve data once connected to another socket
 
     while (bytes_send_client > 0)
     {
@@ -278,7 +274,7 @@ void *thread_fn(void *socketNew)
 
     char *tempReq = (char *)malloc(strlen(buffer) * sizeof(char) + 1);
     // tempReq, buffer both store the http request sent by client
-    for (int i = 0; i < strlen(buffer); i++)
+    for (int i = 0; i < int(strlen(buffer)); i++)
     {
         tempReq[i] = buffer[i];
     }
@@ -300,7 +296,7 @@ void *thread_fn(void *socketNew)
                 response[i] = temp->data[pos];
                 pos++;
             }
-            send(socket, response, MAX_BYTES, 0); // Data send in chunks of 4kb to client
+            send(socket, response, MAX_BYTES, 0);
         }
         printf("Data retrived from the Cache\n\n");
         printf("%s\n\n", response);
@@ -473,7 +469,7 @@ cache_element *find(char *url)
         while (site != NULL)
         {
             if (!strcmp(site->url, url))
-            {
+            { // This return 0
                 printf("LRU Time Track Before : %ld", site->lru_time_track);
                 printf("\nurl found\n");
                 // Updating the time_track
@@ -564,9 +560,6 @@ int add_cache_element(char *data, int size, char *url)
         element->url = (char *)malloc(1 + (strlen(url) * sizeof(char))); // Allocating memory for the request to be stored in the cache element (as a key)
         strcpy(element->url, url);
         element->lru_time_track = time(NULL); // Updating the time_track
-
-        // Insertion at head
-
         element->next = head;
         element->len = size;
         head = element;
