@@ -41,7 +41,7 @@ int proxy_socketId;         // socket descriptor of proxy server
 pthread_t tid[MAX_CLIENTS]; // array to store the thread ids of clients
 sem_t seamaphore;           // if client requests exceeds the max_clients this seamaphore puts the
                   // waiting threads to sleep and wakes them when traffic on queue decreases
-// sem_t cache_lock;
+sem_t cache_lock;
 pthread_mutex_t lock; // lock is used for locking the cache
 
 cache_element *head; // pointer to the cache
@@ -124,11 +124,11 @@ int connectRemoteServer(char *host_addr, int port_num)
     // inserts ip address and port number of host in struct `server_addr`
     struct sockaddr_in server_addr;
 
-    bzero((char *)&server_addr, sizeof(server_addr));
+    memset((char *)&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port_num);
 
-    bcopy((char *)host->h_addr, (char *)&server_addr.sin_addr.s_addr, host->h_length);
+    memcpy((char *)&server_addr.sin_addr.s_addr, (char *)host->h_addr, host->h_length);
 
     // Connect to Remote server ----------------------------------------------------
 
@@ -144,6 +144,11 @@ int connectRemoteServer(char *host_addr, int port_num)
 int handle_request(int clientSocket, ParsedRequest *request, char *tempReq)
 {
     char *buf = (char *)malloc(sizeof(char) * MAX_BYTES);
+    if (buf == NULL)
+    {
+        fprintf(stderr, "Failed to allocate memory for cache elements(Stores http request)\n");
+        return 0;
+    }
     strcpy(buf, "GET ");
     strcat(buf, request->path);
     strcat(buf, " ");
@@ -182,10 +187,17 @@ int handle_request(int clientSocket, ParsedRequest *request, char *tempReq)
 
     int bytes_send = send(remoteSocketID, buf, strlen(buf), 0);
 
-    bzero(buf, MAX_BYTES);
+    memset(buf, 0, MAX_BYTES);
 
     bytes_send = recv(remoteSocketID, buf, MAX_BYTES - 1, 0);
     char *temp_buffer = (char *)malloc(sizeof(char) * MAX_BYTES); // temp buffer
+    if (temp_buffer == NULL)
+    {
+        free(buf);
+        buf = NULL;
+        fprintf(stderr, "Failed to allocate memory for temp_buffer(http request?) element\n");
+        return 0;
+    }
     int temp_buffer_size = MAX_BYTES;
     int temp_buffer_index = 0;
 
@@ -200,14 +212,28 @@ int handle_request(int clientSocket, ParsedRequest *request, char *tempReq)
             temp_buffer_index++;
         }
         temp_buffer_size += MAX_BYTES;
-        temp_buffer = (char *)realloc(temp_buffer, temp_buffer_size);
+
+        char *realloc_handler = (char *)realloc(temp_buffer, temp_buffer_size);
+
+        if (realloc_handler == NULL)
+        {
+            // Handle reallocation failure
+            free(buf); // Free previously allocated memory for buff
+            buf = NULL;
+            free(temp_buffer); // Free temp_buffer in case realloc failed
+            temp_buffer = NULL;
+            fprintf(stderr, "Failed to reallocate memory for temp_buffer\n");
+            return 0; // Return an error code
+        }
+        temp_buffer = realloc_handler;
 
         if (bytes_send < 0)
         {
             perror("Error in sending data to client socket.\n");
             break;
         }
-        bzero(buf, MAX_BYTES);
+
+        memset(buf, 0, MAX_BYTES);
 
         bytes_send = recv(remoteSocketID, buf, MAX_BYTES - 1, 0);
     }
@@ -217,6 +243,8 @@ int handle_request(int clientSocket, ParsedRequest *request, char *tempReq)
     printf("Done\n");
     free(temp_buffer);
 
+    buf = NULL;
+    temp_buffer = NULL;
     close(remoteSocketID);
     return 0;
 }
@@ -250,8 +278,13 @@ void *thread_fn(void *socketNew)
     int bytes_send_client, len; // Bytes Transferred
 
     char *buffer = (char *)calloc(MAX_BYTES, sizeof(char)); // Creating buffer of 4kb for a client
+    if (buffer == NULL)
+    {
+        fprintf(stderr, "Failed to allocate memory for client request buffer\n");
+        return 0;
+    }
 
-    bzero(buffer, MAX_BYTES);                               // Making buffer zero
+    memset(buffer, 0, MAX_BYTES);                           // *** Do we need this ? after using calloc 						// Making buffer zero
     bytes_send_client = recv(socket, buffer, MAX_BYTES, 0); // Receiving the Request of client by proxy server
 
     while (bytes_send_client > 0)
@@ -273,6 +306,13 @@ void *thread_fn(void *socketNew)
     // printf("----------------------%d----------------------\n",strlen(buffer));
 
     char *tempReq = (char *)malloc(strlen(buffer) * sizeof(char) + 1);
+    if (tempReq == NULL)
+    {
+        free(buffer);
+        buffer = NULL;
+        fprintf(stderr, "Failed to allocate memory for tempReq(stores the http request) element\n");
+        return 0;
+    }
     // tempReq, buffer both store the http request sent by client
     for (int i = 0; i < int(strlen(buffer)); i++)
     {
@@ -290,7 +330,7 @@ void *thread_fn(void *socketNew)
         char response[MAX_BYTES];
         while (pos < size)
         {
-            bzero(response, MAX_BYTES);
+            memset(response, 0, MAX_BYTES);
             for (int i = 0; i < MAX_BYTES; i++)
             {
                 response[i] = temp->data[pos];
@@ -319,7 +359,7 @@ void *thread_fn(void *socketNew)
         }
         else
         {
-            bzero(buffer, MAX_BYTES);
+            memset(buffer, 0, MAX_BYTES);
             if (!strcmp(request->method, "GET"))
             {
 
@@ -355,11 +395,13 @@ void *thread_fn(void *socketNew)
     shutdown(socket, SHUT_RDWR);
     close(socket);
     free(buffer);
+    buffer = NULL;
     sem_post(&seamaphore);
 
     sem_getvalue(&seamaphore, &p);
     printf("Semaphore post value:%d\n", p);
     free(tempReq);
+    tempReq = NULL;
     return NULL;
 }
 
@@ -397,7 +439,7 @@ int main(int argc, char *argv[])
     if (setsockopt(proxy_socketId, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse, sizeof(reuse)) < 0)
         perror("setsockopt(SO_REUSEADDR) failed\n");
 
-    bzero((char *)&server_addr, sizeof(server_addr));
+    memset((char *)&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port_number); // Assigning port to the Proxy
     server_addr.sin_addr.s_addr = INADDR_ANY;  // Any available adress assigned
@@ -426,7 +468,7 @@ int main(int argc, char *argv[])
     while (1)
     {
 
-        bzero((char *)&client_addr, sizeof(client_addr)); // Clears struct client_addr
+        memset((char *)&client_addr, 0, sizeof(client_addr)); // Clears struct client_addr
         client_len = sizeof(client_addr);
 
         // Accepting the connections
@@ -520,9 +562,12 @@ void remove_cache_element()
         }
         cache_size = cache_size - (temp->len) - sizeof(cache_element) -
                      strlen(temp->url) - 1; // updating the cache size
-        free(temp->data);
-        free(temp->url); // Free the removed element
-        free(temp);
+        // free(temp->data);      // Freeing memory twice
+        // temp->data = NULL;
+        // free(temp->url); // Free the removed element
+        // temp->url = NULL;
+        // free(temp);
+        // temp = NULL;
     }
     // sem_post(&cache_lock);
     temp_lock_val = pthread_mutex_unlock(&lock);
@@ -543,8 +588,10 @@ int add_cache_element(char *data, int size, char *url)
         temp_lock_val = pthread_mutex_unlock(&lock);
         printf("Add Cache Lock Unlocked %d\n", temp_lock_val);
         // free(data);
+        // data = NULL; freeing memory twice
         // printf("--\n");
         // free(url);
+        // url = NULL;
         return 0;
     }
     else
@@ -555,9 +602,35 @@ int add_cache_element(char *data, int size, char *url)
             remove_cache_element();
         }
         cache_element *element = (cache_element *)malloc(sizeof(cache_element)); // Allocating memory for the new cache element
-        element->data = (char *)malloc(size + 1);                                // Allocating memory for the response to be stored in the cache element
+        if (element == NULL)
+        {
+            fprintf(stderr, "Failed to allocate memory for new cache element\n");
+            return 0;
+        }
+        element->data = (char *)malloc(size + 1); // Allocating memory for the response to be stored in the cache element
+
+        if (element->data == NULL)
+        {
+            free(element);
+            element = NULL;
+            fprintf(stderr, "Failed to allocate memory for cache element's data \n");
+            return 0;
+        }
+
         strcpy(element->data, data);
+
         element->url = (char *)malloc(1 + (strlen(url) * sizeof(char))); // Allocating memory for the request to be stored in the cache element (as a key)
+
+        if (element->url == NULL)
+        {
+            free(element->data);
+            element->data = NULL;
+            free(element);
+            element = NULL;
+            fprintf(stderr, "Failed to allocate memory for cache element's url \n");
+            return 0;
+        }
+
         strcpy(element->url, url);
         element->lru_time_track = time(NULL); // Updating the time_track
         element->next = head;
@@ -566,10 +639,12 @@ int add_cache_element(char *data, int size, char *url)
         cache_size += element_size;
         temp_lock_val = pthread_mutex_unlock(&lock);
         printf("Add Cache Lock Unlocked %d\n", temp_lock_val);
-        // sem_post(&cache_lock);
-        //  free(data);
-        //  printf("--\n");
-        //  free(url);
+        sem_post(&cache_lock);
+        // free(data);
+        // data = NULL; // freeing memory twice
+        // printf("--\n");
+        // free(url);
+        // url = NULL;
         return 1;
     }
     return 0;
