@@ -1,0 +1,14 @@
+Linux Man Guide
+Socket programming life cycle : "https://stackoverflow.com/questions/27014955/socket-connect-vs-bind"
+Overloading free / malloc function : "https://stackoverflow.com/questions/24893413/is-there-a-way-to-overwrite-the-malloc-free-function-in-c"
+Double free or corruption out error : "https://stackoverflow.com/questions/42365244/what-causes-double-free-or-corruption-out-error"
+bzero and bcopy vs memset and memcpy : "https://stackoverflow.com/questions/18330673/bzero-bcopy-versus-memset-memcpy"
+Data Loss while tcping 😂 ? : "https://stackoverflow.com/questions/19904407/c-socket-connection-and-data-loss"
+Size of recv buffer : "https://stackoverflow.com/questions/2862071/how-large-should-my-recv-buffer-be-when-calling-recv-in-the-socket-library"
+What is size of message is less than recv buffer size : "https://stackoverflow.com/questions/2862071/how-large-should-my-recv-buffer-be-when-calling-recv-in-the-socket-library"
+Conversion from size_t to int 
+⚠ How to get a type of variable in C : "https://stackoverflow.com/questions/9156226/how-to-get-the-type-of-a-variable-in-c-code"
+How to deal with malloc and calloc failure : pointer returns null , handle the pointer and previously allocated memory well
+How to deal with realloc failure : "https://stackoverflow.com/questions/12409774/how-to-free-pointers-within-a-dynamic-array-when-realloc-fails?noredirect=1&lq=1"
+Are Dangling pointer dangerous in C : "https://stackoverflow.com/questions/48161659/is-dangling-pointer-dangerous-if-never-being-used"
+Should the client and socket logic implemented in different files : Depends but mostly yes
