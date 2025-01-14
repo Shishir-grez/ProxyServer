@@ -1,6 +1,7 @@
 Since the request parser used here only works for HTTP 1.1
 These are the websites you could experiment with 
-1. https://www.cs.princeton.edu/
-2. http://httpforever.com/
+1. http://httpforever.com/
+2. http://www.cs.princeton.edu/
+3. Choose one from this answer "https://superuser.com/questions/1213116/are-there-well-known-http-only-sites" 
 
-with the rest of these websites it would give parsing error
+with the rest of these websites it would give parsing error or cors error
