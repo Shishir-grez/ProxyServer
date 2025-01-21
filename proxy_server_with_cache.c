@@ -36,7 +36,8 @@ cache_element *find(char *url);
 int add_cache_element(char *data, int size, char *url);
 void remove_cache_element();
 
-int port_number = 8080;		// Default Port
+
+int port_number;	
 int proxy_socketId;			// socket descriptor of proxy server
 pthread_t tid[MAX_CLIENTS]; // array to store the thread ids of clients
 sem_t semaphore;			// if client requests exceeds the max_clients this  puts the

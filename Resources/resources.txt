@@ -15,3 +15,4 @@ Should the client and socket logic implemented in different files : Depends but 
 How to mark the end of http header : " https://stackoverflow.com/questions/14926062/detecting-end-of-http-header-with-r-n-r-n "
 Passing command line arguments to gdb : "https://stackoverflow.com/questions/6121094/how-do-i-run-a-program-with-commandline-arguments-using-gdb-within-a-bash-script" 
 pthreads vs lpthreads compiler flag : "https://stackoverflow.com/questions/23250863/difference-between-pthread-and-lpthread-while-compiling"
+h_addr field in hostent VSCODE : "https://stackoverflow.com/questions/11405819/does-struct-hostent-have-a-field-h-addr"
