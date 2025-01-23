@@ -1,3 +1,31 @@
+/**
+ * @file proxy_server.c
+ * @brief Proxy server that listens for client connections and handles requests.
+ *
+ * This program sets up a proxy server that listens on a specified port, accepts
+ * client connections, and processes the requests in separate threads. It uses a
+ * hashmap to manage request data and synchronizes concurrent access using semaphores
+ * and mutexes.
+ *
+ * @dependencies
+ *   - `stdio.h`    : Standard input/output functions.
+ *   - `stdlib.h`   : General-purpose utility functions like memory management.
+ *   - `string.h`   : String manipulation functions.
+ *   - `sys/types.h`: System-level types.
+ *   - `sys/socket.h`: Socket programming functions.
+ *   - `netinet/in.h`: Definitions for Internet addresses and protocols.
+ *   - `netdb.h`    : Functions for host information.
+ *   - `arpa/inet.h`: Functions for IP address manipulation.
+ *   - `unistd.h`   : Unix standard library for file and process control.
+ *   - `fcntl.h`    : File control operations.
+ *   - `time.h`     : Functions for working with time.
+ *   - `sys/wait.h` : Functions for handling child processes.
+ *   - `errno.h`    : Error handling definitions.
+ *   - `pthread.h`  : POSIX threads for multithreading.
+ *   - `semaphore.h`: POSIX semaphores for synchronization.
+ *	 - `proxy_parse.h` : Library to Parse HTTP requests. Supports only GET requests for now.
+ */
+
 #include "proxy_parse.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,34 +52,82 @@
 #define MAX_SIZE 200 * (1 << 20)		// size of the cache 200MB
 #define MAX_ELEMENT_SIZE 10 * (1 << 20) // max size of an element in cache 10 mb
 
+/**
+ * @struct Hashmap
+ * @brief Represents a hash table structure for storing cached data.
+ *
+ * The `Hashmap` struct holds an array of pointers to `cache_element` structures. 
+ * Each element in the array corresponds to a bucket in the hash table, and is used
+ * to resolve collisions via linked lists. This structure is used to efficiently store 
+ * and retrieve cached data based on URL keys.
+ *
+ * @field table An array of pointers to `cache_element` structures. Each entry in the 
+ *              array represents a bucket in the hash table. 
+ *              The size of the table is defined by `HASH_SIZE`.
+ */
+
 typedef struct Hashmap
 {
 	cache_element *table[HASH_SIZE]; 
 
 } Hashmap;
 
+/**
+ * @struct ThreadArgs
+ * @brief Arguments passed to each thread that handles a client request.
+ *
+ * This structure holds the arguments needed by each thread to process a client's request.
+ * It contains a pointer to the shared `Hashmap` structure for accessing cached data
+ * and the socket descriptor used for communication with the client.
+ *
+ * @field map Pointer to the shared `Hashmap` that stores cached data for the proxy server.
+ * @field socket The client socket descriptor used for communication between the proxy server 
+ *               and the client.
+ */
+
 typedef struct ThreadArgs
 {
-	Hashmap *map; // Pointer to the shared hashmap
-	int socket;	  // Client socket descriptor
+	Hashmap *map; 
+	int socket;	  
 
 } ThreadArgs;
 
+
+/**
+ * @struct cache_element
+ * @brief Represents a single element in the cache.
+ *
+ * The `cache_element` structure stores the cached data for a particular URL. It includes 
+ * information about the data (e.g., the actual cached response and its length), the URL 
+ * associated with the cached data, and pointers to manage cache eviction using the Least 
+ * Recently Used (LRU) cache replacement policy.
+ *
+ * @field data A pointer to the cached data (e.g., HTTP response) that is stored.
+ *
+ * @field len The length of the cached data. This typically holds the size of the `data` in bytes.
+ *
+ * @field url The URL associated with the cached data. This is the key used to store/retrieve 
+ *             the cached response.
+ *
+ * @field lru_time_track The timestamp indicating the last time this element was accessed. 
+ *                        Used for managing the LRU cache eviction policy.
+ *
+ * @field next Pointer to the next `cache_element` in the linked list. Used for handling 
+ *             collisions in the hash table (separate chaining).
+ *
+ * @field left Pointer to the previous `cache_element` in the LRU queue.
+ * @field right Pointer to the next `cache_element` in the LRU queue.
+ */
+
 struct cache_element
 {
-	char *data;					// data stores response
-
-	int len;					// length of data i.e.. sizeof(data)...
-
-	char *url;					// url stores the request
-
-	time_t lru_time_track;		// lru_time_track stores the latest time the element is  accesed
-
-	struct cache_element *next; // Pointer to next node in the list for collision resolution
-
-	struct cache_element *left; // Points to Element left to curr in queue (added before curr element)
-
-	struct cache_element *right; // Points to Element right to curr in queue (added after curr element)
+	char *data;					
+	int len;					
+	char *url;					
+	time_t lru_time_track;		
+	struct cache_element *next; 
+	struct cache_element *left;
+	struct cache_element *right; 
 };
 
 typedef struct cache_element cache_element;
@@ -80,15 +156,33 @@ void deleteNode(Hashmap *map);
 void freeHashMap(Hashmap *map);
 
 int port_number;
-int proxy_socketId;			// socket descriptor of proxy server
-pthread_t tid[MAX_CLIENTS]; // array to store the thread ids of clients
-sem_t semaphore;			// if client requests exceeds the max_clients this  puts the
-							// waiting threads to sleep and wakes them when traffic on queue decreases
+int proxy_socketId;							// socket descriptor of proxy server
+pthread_t tid[MAX_CLIENTS]; 				// array to store the thread ids of clients
+sem_t semaphore;							// if client requests exceeds the max_clients this  puts the
+											// waiting threads to sleep and wakes them when traffic on queue decreases
 sem_t cache_lock;
-pthread_mutex_t lock; // lock is used for locking the cache
+pthread_mutex_t lock;						// lock is used for locking the cache
 
 cache_element *qhead = NULL, *qtail = NULL; // Pointer to head and tail of queue
 int cache_size;								// cache_size denotes the current size of the cache
+
+/**
+ * @file proxy_server_with_cache.c
+ * @brief The entry point of a multi-threaded proxy server.
+ *
+ * This function initializes the proxy server, creates the necessary sockets,
+ * handles client connections, and spawns threads to process each client's request.
+ * It uses a hashmap for caching, semaphores to limit the number of concurrent
+ * clients, and mutexes for synchronization.
+ *
+ * @usage
+ *   - Run the program with a port number as an argument: `./proxy_server 8080`.
+ *   - The server listens on the provided port and accepts client connections.
+ *
+ * @param argc The number of arguments passed to the program.
+ * @param argv The arguments passed to the program, where argv[1] contains the port number.
+ * @return 0 on successful execution, exits on errors.
+ */
 
 int main(int argc, char *argv[])
 {
@@ -206,6 +300,32 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
+/**
+ * @brief Sends an HTTP error message to the client based on the provided status code.
+ *
+ * This function constructs an HTTP error response message in HTML format for common
+ * HTTP status codes (400, 403, 404, 500, 501, 505) and sends it to the client via
+ * the specified socket. The response includes the status code, a descriptive message,
+ * the current date and time, and relevant headers like `Content-Length`, `Content-Type`, 
+ * and `Server`. The function also prints the status code to the console for logging purposes.
+ *
+ * @param socket The socket descriptor representing the connection with the client.
+ * @param status_code The HTTP status code to be sent in the error message.
+ *                    It should be one of the following: 400, 403, 404, 500, 501, or 505.
+ *
+ * @return Returns 1 on success if the error message was sent successfully.
+ *         Returns -1 if an unsupported status code is provided.
+ *
+ * @details This function constructs a formatted HTML page with an appropriate message
+ *          corresponding to the provided HTTP status code and sends the response using
+ *          the `send()` system call. The `Date` header in the response reflects the
+ *          current time at the moment the error message is generated.
+ *
+ * @example
+ *   int client_socket = ...;  // A valid client socket descriptor.
+ *   sendErrorMessage(client_socket, 404);  // Sends a "404 Not Found" error.
+ */
+
 int sendErrorMessage(int socket, int status_code)
 {
 	char str[1024];
@@ -259,6 +379,31 @@ int sendErrorMessage(int socket, int status_code)
 	return 1;
 }
 
+/**
+ * @brief Establishes a connection to a proxy server.
+ *
+ * This function creates a socket and attempts to connect to the specified proxy server
+ * using its host address and port number. It resolves the provided host address to an
+ * IP address using `gethostbyname()` and establishes a connection using the `connect()` system call.
+ *
+ * @param host_addr The hostname or IP address of the proxy server.
+ * @param port_num The port number to connect to on the proxy server.
+ *
+ * @return Returns the client socket descriptor if the connection is successfully established.
+ *         Returns -1 if an error occurs during socket creation, host resolution, or connection.
+ *
+ * @details This function handles creating a socket, resolving the proxy server's address using
+ *          `gethostbyname()`, and then connecting to the server at the specified port. The socket
+ *          descriptor is returned for further communication. If any error occurs (e.g., the host cannot
+ *          be resolved or the connection cannot be made), an error message is printed and -1 is returned.
+ *
+ * @example
+ *   int clientSocket = connectToProxy("proxy.example.com", 8080);
+ *   if (clientSocket < 0) {
+ *       // Handle error
+ *   }
+ */
+
 int connectToProxy(char *host_addr, int port_num)
 {
 
@@ -295,6 +440,41 @@ int connectToProxy(char *host_addr, int port_num)
 	return clientSocket;
 }
 
+/**
+ * @brief Handles a client HTTP request by forwarding it to the proxy server and caching the response.
+ *
+ * This function builds an HTTP request string from a parsed request, connects to the appropriate proxy server,
+ * sends the request, receives the response, and caches it in the provided `Hashmap`. The response is also
+ * forwarded to the client.
+ *
+ * @param map A pointer to the `Hashmap` where the response should be cached.
+ * @param proxy_socket The client socket descriptor used to forward the response back to the client.
+ * @param request A pointer to the parsed HTTP request.
+ * @param storeHttpRequest A string used as a key for caching the response in the hashmap.
+ *
+ * @return Returns 0 if the request is handled successfully. Returns a non-zero value (typically 0) if memory allocation
+ *         or network communication fails during the process.
+ *
+ * @details This function performs the following steps:
+ *          - Allocates memory to build the HTTP request.
+ *          - Sets necessary headers (`Connection`, `Host`).
+ *          - Constructs and sends the HTTP request to the proxy server.
+ *          - Receives the server's response in chunks, caches it, and sends it to the client.
+ *          - Frees allocated memory and closes the client socket.
+ *
+ * @example
+ *   Hashmap *map = ...;  // A valid pointer to a hashmap.
+ *   ParsedRequest request = ...;  // A parsed HTTP request.
+ *   char *storeHttpRequest = "example_request_key";  // A key for caching.
+ *   int proxy_socket = ...;  // A valid client socket to forward the response.
+ *   int result = handle_request(map, proxy_socket, &request, storeHttpRequest);
+ *   if (result == 0) {
+ *       // Request handled successfully
+ *   } else {
+ *       // Handle error
+ *   }
+ */
+
 int handle_request(Hashmap *map, int proxy_socket, ParsedRequest *request, char *storeHttpRequest)
 {
 	char *method_http_v_buf = (char *)malloc(sizeof(char) * MAX_BYTES);
@@ -303,6 +483,7 @@ int handle_request(Hashmap *map, int proxy_socket, ParsedRequest *request, char 
 		fprintf(stderr, "Failed to allocate memory for cache elements(Stores http request)\n");
 		return 0;
 	}
+	// Copying http method into this buffer
 	strcpy(method_http_v_buf, "GET ");
 	strcat(method_http_v_buf, request->path);
 	strcat(method_http_v_buf, " ");
@@ -359,6 +540,8 @@ int handle_request(Hashmap *map, int proxy_socket, ParsedRequest *request, char 
 
 	int cache_index = 0;
 
+	// Storing entire request inside to_be_cached
+
 	while (bytes_send > 0)
 	{
 		bytes_send = send(proxy_socket, method_http_v_buf, bytes_send, 0);
@@ -406,6 +589,32 @@ int handle_request(Hashmap *map, int proxy_socket, ParsedRequest *request, char 
 	return 0;
 }
 
+/**
+ * @brief Checks the version of an HTTP message.
+ *
+ * This function checks whether the provided HTTP message corresponds to a specific version (either HTTP/1.0 or HTTP/1.1).
+ * It matches the beginning of the string to determine the version and returns an integer indicating the version.
+ * HTTP/1.0 and HTTP/1.1 are handled similarly in this implementation.
+ *
+ * @param msg A string representing the HTTP message to check (usually the first line of the HTTP request).
+ *
+ * @return Returns:
+ *         - 1 if the message corresponds to either HTTP/1.0 or HTTP/1.1.
+ *         - -1 if the version is unsupported or unrecognized.
+ *
+ * @details This function assumes that the HTTP version appears at the beginning of the message.
+ *          It supports HTTP/1.0 and HTTP/1.1 only. If the version is recognized, it returns 1, otherwise, it returns -1.
+ *
+ * @example
+ *   char *message = "HTTP/1.1 200 OK";
+ *   int version = checkHTTPversion(message);
+ *   if (version == 1) {
+ *       // Handle HTTP/1.0 or HTTP/1.1 request
+ *   } else {
+ *       // Handle unsupported version
+ *   }
+ */
+
 int checkHTTPversion(char *msg)
 {
 	int version = -1;
@@ -423,6 +632,33 @@ int checkHTTPversion(char *msg)
 
 	return version;
 }
+
+/**
+ * @brief Handles a client request in a separate thread by receiving, processing, and responding to it.
+ *
+ * This function is executed in a separate thread to handle incoming client requests in a proxy server.
+ * It receives an HTTP request from the client, checks the cache for the requested data, and if not found,
+ * forwards the request to the intended server. It then sends the response to the client, either from the cache
+ * or from the server's response. Additionally, it handles errors and manages semaphore synchronization for concurrency.
+ *
+ * @param arg A pointer to `ThreadArgs` struct containing the shared `Hashmap` and client socket descriptor.
+ *            The `arg` should be cast to a `ThreadArgs` pointer within the function.
+ *
+ * @return Returns `NULL` upon completion. It does not return a specific value.
+ *
+ * @details The function handles the following tasks:
+ *          - Receives the HTTP request from the client.
+ *          - Checks if the request is cached.
+ *          - If found in cache, sends the cached response back to the client.
+ *          - If not found in cache, forwards the request to the target server, handles the response, caches it, and then sends it to the client.
+ *          - Ensures thread synchronization using semaphores.
+ *          - Properly handles memory allocation, socket management, and client disconnects.
+ *
+ * @example
+ *   // Example code using thread_fn function in a thread pool
+ *   pthread_create(&thread, NULL, thread_fn, (void *)&args);
+ *   // Where `args` contains the necessary data (e.g., Hashmap pointer and client socket).
+ */
 
 void *thread_fn(void *arg)
 {
@@ -565,6 +801,29 @@ void *thread_fn(void *arg)
 	return NULL;
 }
 
+
+/**
+ * @brief Computes the hash value for a given string (URL).
+ *
+ * This function uses a polynomial hash function to compute the hash value of a string.
+ * The hash value is calculated by iterating over the characters of the string and updating
+ * the hash using the formula `hashValue = (hashValue * 31) + *key`, where `31` is a constant multiplier.
+ * The result is then modulo'd by `HASH_SIZE` to ensure that the hash value fits within the range of the hash table.
+ *
+ * @param key A pointer to the string (URL) for which the hash value needs to be computed.
+ *
+ * @return Returns the computed hash value, which is the index in the hash table.
+ *         The value is between `0` and `HASH_SIZE - 1`.
+ *
+ * @details The function computes the hash of a string and returns an index value for storing/retrieving
+ *          the string in a hashmap (of fixed size). It ensures the resulting value fits within the table bounds.
+ *
+ * @example
+ *   const char *url = "https://example.com";
+ *   unsigned int index = hash(url);
+ *   // Use `index` to store or retrieve the corresponding data in a hashmap.
+ */
+
 unsigned int hash(const char *key)
 {
 	// Polynomial hash function for strins ( URL )
@@ -577,6 +836,25 @@ unsigned int hash(const char *key)
 	return hashValue % HASH_SIZE;
 }
 
+/**
+ * @brief Initializes the hashmap by setting all table entries to `NULL`.
+ *
+ * This function initializes the hashmap, setting all the entries in the hash table
+ * to `NULL`. It ensures that the hashmap is ready to store key-value pairs.
+ * The `table` in the `Hashmap` struct is an array of pointers, and this function
+ * clears them to prevent undefined behavior when inserting or retrieving elements.
+ *
+ * @param map A pointer to the `Hashmap` that needs to be initialized.
+ *
+ * @details This function should be called before any operations on the hashmap (insertion or retrieval).
+ *          It sets up an empty hash table where each entry is initialized to `NULL`.
+ *
+ * @example
+ *   Hashmap map;
+ *   initHashMap(&map);
+ *   // Now the map is ready for insertion.
+ */
+
 void initHashMap(Hashmap *map)
 {
 
@@ -586,7 +864,39 @@ void initHashMap(Hashmap *map)
 	}
 }
 
-// Insert a URL into the hashmap
+/**
+ * @brief Inserts a new URL and its associated data into the hashmap, with cache eviction if necessary.
+ *
+ * This function inserts a new cache element into the hashmap. It first checks if the URL already exists
+ * in the cache; if so, it skips insertion. If not, it allocates memory for a new cache element, adds it
+ * to the hashmap at the appropriate index, and also updates the least recently used (LRU) queue for cache eviction.
+ * If the cache size exceeds the maximum size (`MAX_SIZE`), it evicts the least recently used (LRU) element.
+ *
+ * @param map A pointer to the `Hashmap` where the data will be inserted.
+ * @param data The data (e.g., the HTTP response) associated with the URL to store.
+ * @param size The size of the `data` (in bytes).
+ * @param key The URL (key) to associate with the `data`.
+ *
+ * @return This function doesn't return anything. It performs the insertion or handles cache eviction.
+ *
+ * @details The function performs the following:
+ *          - Computes the hash index based on the URL (`key`).
+ *          - Checks if the URL already exists in the cache and skips insertion if it does.
+ *          - If not, it allocates memory for a new cache element and inserts it at the calculated hash index.
+ *          - If the cache exceeds the size limit (`MAX_SIZE`), it evicts the least recently used element.
+ *          - It also updates the LRU queue to keep track of recently accessed elements.
+ * 
+ * @note This function uses a mutex lock (`lock`) to ensure thread safety during insertion, and it uses a
+ *       LRU-based eviction policy when the cache exceeds its size.
+ *
+ * @example
+ *   // Example of using `insert` function
+ *   char *data = "<HTML>...</HTML>";
+ *   const char *key = "https://example.com";
+ *   insert(&map, data, strlen(data), key);
+ *   // The URL and its corresponding data are now stored in the hashmap.
+ */
+
 void insert(Hashmap *map, char *data, int size, const char *key)
 {
 	unsigned int index = hash(key);
@@ -703,6 +1013,36 @@ void insert(Hashmap *map, char *data, int size, const char *key)
 	return;
 }
 
+/**
+ * @brief Searches for a cache element associated with a given URL in the hashmap.
+ *
+ * This function searches the hashmap for a cache element that corresponds to the given URL.
+ * If the URL is found in the hashmap, it updates the Least Recently Used (LRU) timestamp to
+ * reflect the most recent access and moves the element to the front of the LRU queue (i.e., 
+ * the head of the queue). This function ensures the LRU cache eviction policy is followed.
+ * If the URL is not found, the function returns `NULL`.
+ *
+ * @param map A pointer to the `Hashmap` where the search is performed.
+ * @param key A pointer to the URL (key) to search for in the hashmap.
+ *
+ * @return A pointer to the `cache_element` associated with the given URL if found, otherwise `NULL`.
+ *
+ * @details The function performs the following:
+ *          - Computes the hash index for the given URL.
+ *          - Searches through the linked list at the computed index.
+ *          - If the URL is found, it updates the LRU time and moves the element to the front of the LRU queue.
+ *          - If not found, the function returns `NULL`.
+ * 
+ * @example
+ *   Hashmap map;
+ *   cache_element *element = search(&map, "https://example.com");
+ *   if (element != NULL) {
+ *       printf("Found element with URL: %s\n", element->url);
+ *   } else {
+ *       printf("URL not found\n");
+ *   }
+ */
+
 cache_element *search(Hashmap *map, const char *key)
 {
 
@@ -767,7 +1107,27 @@ cache_element *search(Hashmap *map, const char *key)
 	return NULL;
 }
 
-// Delete a node from the hashmap (optional cleanup)
+/**
+ * @brief Deletes a cache element from the hashmap and the LRU queue.
+ *
+ * This function evicts the least recently used (LRU) cache element from both the hashmap and the LRU queue.
+ * It is typically called when the cache exceeds its size limit, and the LRU eviction policy needs to be applied.
+ * The node is removed from the hashmap (using its hash index), the memory is freed, and the cache size is updated.
+ *
+ * @param map A pointer to the `Hashmap` from which the node will be deleted.
+ *
+ * @details The function performs the following:
+ *          - Locks the cache to ensure thread-safe deletion.
+ *          - Retrieves the least recently used node from the tail of the LRU queue.
+ *          - Removes the node from the hashmap by traversing the list at the hash index.
+ *          - Frees the memory associated with the URL and cache element.
+ *          - Updates the cache size after deletion.
+ * 
+ * @example
+ *   deleteNode(&map);
+ *   // Deletes the least recently used element from the cache.
+ */
+
 void deleteNode(Hashmap *map)
 {
 	int temp_lock_val = pthread_mutex_lock(&lock);
@@ -832,6 +1192,25 @@ void deleteNode(Hashmap *map)
 	temp_lock_val = pthread_mutex_unlock(&lock);
 	printf("Remove Cache Lock Unlocked %d\n", temp_lock_val);
 }
+
+/**
+ * @brief Frees all memory allocated for the cache elements in the hashmap.
+ *
+ * This function iterates through all the entries in the hashmap and frees the memory allocated
+ * for each cache element, including its URL and data. It is typically used when the program terminates
+ * or when the cache is no longer needed.
+ *
+ * @param map A pointer to the `Hashmap` to be freed.
+ *
+ * @details The function performs the following:
+ *          - Iterates through the hashmap and frees each cache element.
+ *          - Frees the memory allocated for the URL and data of each cache element.
+ *          - The memory for the cache elements is fully cleaned up to prevent memory leaks.
+ * 
+ * @example
+ *   freeHashMap(&map);
+ *   // Frees all memory used by the cache.
+ */
 
 void freeHashMap(Hashmap *map)
 {
