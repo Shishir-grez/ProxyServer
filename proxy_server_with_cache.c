@@ -52,23 +52,25 @@
 #define MAX_SIZE 200 * (1 << 20)		// size of the cache 200MB
 #define MAX_ELEMENT_SIZE 10 * (1 << 20) // max size of an element in cache 10 mb
 
+typedef struct cache_element cache_element;
+
 /**
  * @struct Hashmap
  * @brief Represents a hash table structure for storing cached data.
  *
- * The `Hashmap` struct holds an array of pointers to `cache_element` structures. 
+ * The `Hashmap` struct holds an array of pointers to `cache_element` structures.
  * Each element in the array corresponds to a bucket in the hash table, and is used
- * to resolve collisions via linked lists. This structure is used to efficiently store 
+ * to resolve collisions via linked lists. This structure is used to efficiently store
  * and retrieve cached data based on URL keys.
  *
- * @field table An array of pointers to `cache_element` structures. Each entry in the 
- *              array represents a bucket in the hash table. 
+ * @field table An array of pointers to `cache_element` structures. Each entry in the
+ *              array represents a bucket in the hash table.
  *              The size of the table is defined by `HASH_SIZE`.
  */
 
 typedef struct Hashmap
 {
-	cache_element *table[HASH_SIZE]; 
+	cache_element *table[HASH_SIZE];
 
 } Hashmap;
 
@@ -81,38 +83,37 @@ typedef struct Hashmap
  * and the socket descriptor used for communication with the client.
  *
  * @field map Pointer to the shared `Hashmap` that stores cached data for the proxy server.
- * @field socket The client socket descriptor used for communication between the proxy server 
+ * @field socket The client socket descriptor used for communication between the proxy server
  *               and the client.
  */
 
 typedef struct ThreadArgs
 {
-	Hashmap *map; 
-	int socket;	  
+	Hashmap *map;
+	int socket;
 
 } ThreadArgs;
-
 
 /**
  * @struct cache_element
  * @brief Represents a single element in the cache.
  *
- * The `cache_element` structure stores the cached data for a particular URL. It includes 
- * information about the data (e.g., the actual cached response and its length), the URL 
- * associated with the cached data, and pointers to manage cache eviction using the Least 
+ * The `cache_element` structure stores the cached data for a particular URL. It includes
+ * information about the data (e.g., the actual cached response and its length), the URL
+ * associated with the cached data, and pointers to manage cache eviction using the Least
  * Recently Used (LRU) cache replacement policy.
  *
  * @field data A pointer to the cached data (e.g., HTTP response) that is stored.
  *
  * @field len The length of the cached data. This typically holds the size of the `data` in bytes.
  *
- * @field url The URL associated with the cached data. This is the key used to store/retrieve 
+ * @field url The URL associated with the cached data. This is the key used to store/retrieve
  *             the cached response.
  *
- * @field lru_time_track The timestamp indicating the last time this element was accessed. 
+ * @field lru_time_track The timestamp indicating the last time this element was accessed.
  *                        Used for managing the LRU cache eviction policy.
  *
- * @field next Pointer to the next `cache_element` in the linked list. Used for handling 
+ * @field next Pointer to the next `cache_element` in the linked list. Used for handling
  *             collisions in the hash table (separate chaining).
  *
  * @field left Pointer to the previous `cache_element` in the LRU queue.
@@ -121,16 +122,14 @@ typedef struct ThreadArgs
 
 struct cache_element
 {
-	char *data;					
-	int len;					
-	char *url;					
-	time_t lru_time_track;		
-	struct cache_element *next; 
+	char *data;
+	int len;
+	char *url;
+	time_t lru_time_track;
+	struct cache_element *next;
 	struct cache_element *left;
-	struct cache_element *right; 
+	struct cache_element *right;
 };
-
-typedef struct cache_element cache_element;
 
 int sendErrorMessage(int socket, int status_code);
 
@@ -156,12 +155,12 @@ void deleteNode(Hashmap *map);
 void freeHashMap(Hashmap *map);
 
 int port_number;
-int proxy_socketId;							// socket descriptor of proxy server
-pthread_t tid[MAX_CLIENTS]; 				// array to store the thread ids of clients
-sem_t semaphore;							// if client requests exceeds the max_clients this  puts the
-											// waiting threads to sleep and wakes them when traffic on queue decreases
+int proxy_socketId;			// socket descriptor of proxy server
+pthread_t tid[MAX_CLIENTS]; // array to store the thread ids of clients
+sem_t semaphore;			// if client requests exceeds the max_clients this  puts the
+							// waiting threads to sleep and wakes them when traffic on queue decreases
 sem_t cache_lock;
-pthread_mutex_t lock;						// lock is used for locking the cache
+pthread_mutex_t lock; // lock is used for locking the cache
 
 cache_element *qhead = NULL, *qtail = NULL; // Pointer to head and tail of queue
 int cache_size;								// cache_size denotes the current size of the cache
@@ -306,7 +305,7 @@ int main(int argc, char *argv[])
  * This function constructs an HTTP error response message in HTML format for common
  * HTTP status codes (400, 403, 404, 500, 501, 505) and sends it to the client via
  * the specified socket. The response includes the status code, a descriptive message,
- * the current date and time, and relevant headers like `Content-Length`, `Content-Type`, 
+ * the current date and time, and relevant headers like `Content-Length`, `Content-Type`,
  * and `Server`. The function also prints the status code to the console for logging purposes.
  *
  * @param socket The socket descriptor representing the connection with the client.
@@ -664,7 +663,7 @@ void *thread_fn(void *arg)
 {
 	ThreadArgs *args = (ThreadArgs *)arg; // Extracting args from arg
 
-	Hashmap *map = args->map; 
+	Hashmap *map = args->map;
 
 	int socketNew = args->socket;
 
@@ -801,7 +800,6 @@ void *thread_fn(void *arg)
 	return NULL;
 }
 
-
 /**
  * @brief Computes the hash value for a given string (URL).
  *
@@ -885,7 +883,7 @@ void initHashMap(Hashmap *map)
  *          - If not, it allocates memory for a new cache element and inserts it at the calculated hash index.
  *          - If the cache exceeds the size limit (`MAX_SIZE`), it evicts the least recently used element.
  *          - It also updates the LRU queue to keep track of recently accessed elements.
- * 
+ *
  * @note This function uses a mutex lock (`lock`) to ensure thread safety during insertion, and it uses a
  *       LRU-based eviction policy when the cache exceeds its size.
  *
@@ -996,7 +994,7 @@ void insert(Hashmap *map, char *data, int size, const char *key)
 		}
 		else
 		{
-			// Insertion at qhead 
+			// Insertion at qhead
 			element->left = NULL;
 			element->right = qhead;
 
@@ -1018,7 +1016,7 @@ void insert(Hashmap *map, char *data, int size, const char *key)
  *
  * This function searches the hashmap for a cache element that corresponds to the given URL.
  * If the URL is found in the hashmap, it updates the Least Recently Used (LRU) timestamp to
- * reflect the most recent access and moves the element to the front of the LRU queue (i.e., 
+ * reflect the most recent access and moves the element to the front of the LRU queue (i.e.,
  * the head of the queue). This function ensures the LRU cache eviction policy is followed.
  * If the URL is not found, the function returns `NULL`.
  *
@@ -1032,7 +1030,7 @@ void insert(Hashmap *map, char *data, int size, const char *key)
  *          - Searches through the linked list at the computed index.
  *          - If the URL is found, it updates the LRU time and moves the element to the front of the LRU queue.
  *          - If not found, the function returns `NULL`.
- * 
+ *
  * @example
  *   Hashmap map;
  *   cache_element *element = search(&map, "https://example.com");
@@ -1122,7 +1120,7 @@ cache_element *search(Hashmap *map, const char *key)
  *          - Removes the node from the hashmap by traversing the list at the hash index.
  *          - Frees the memory associated with the URL and cache element.
  *          - Updates the cache size after deletion.
- * 
+ *
  * @example
  *   deleteNode(&map);
  *   // Deletes the least recently used element from the cache.
@@ -1137,7 +1135,7 @@ void deleteNode(Hashmap *map)
 	{
 		temp_lock_val = pthread_mutex_unlock(&lock);
 		printf("Remove Cache Lock Unlocked %d\n", temp_lock_val);
-		return; 
+		return;
 	}
 
 	// Locate last element in queue using tail
@@ -1206,7 +1204,7 @@ void deleteNode(Hashmap *map)
  *          - Iterates through the hashmap and frees each cache element.
  *          - Frees the memory allocated for the URL and data of each cache element.
  *          - The memory for the cache elements is fully cleaned up to prevent memory leaks.
- * 
+ *
  * @example
  *   freeHashMap(&map);
  *   // Frees all memory used by the cache.
@@ -1228,8 +1226,8 @@ void freeHashMap(Hashmap *map)
 }
 
 /*
-	Common pattern in this code ,handling of malloc / realloc failure 
-	Done using checking if malloc / realloc returned NULL 
-	(Indicating Failure) 
+	Common pattern in this code ,handling of malloc / realloc failure
+	Done using checking if malloc / realloc returned NULL
+	(Indicating Failure)
 	If yes Free any memory allocated previously + exiting the code
  */
