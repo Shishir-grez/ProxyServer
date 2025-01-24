@@ -188,16 +188,6 @@ int main(int argc, char *argv[])
 	Hashmap map;
 	initHashMap(&map);
 
-	ThreadArgs *args = (ThreadArgs *)malloc(sizeof(ThreadArgs));
-
-	if (args == NULL)
-	{
-		fprintf(stderr, "Failed to allocate memory for thread arguments\n");
-		exit(1);
-	}
-
-	args->map = &map;
-
 	int client_socketId, client_len;
 	struct sockaddr_in server_addr, client_addr;
 
@@ -274,7 +264,16 @@ int main(int argc, char *argv[])
 			Connected_socketId[i] = client_socketId; // Storing accepted clients into array
 		}
 
-		args->socket = Connected_socketId[i];
+		  ThreadArgs *args = malloc(sizeof(ThreadArgs));
+
+  		  args->map = &map;
+  		  args->socket = client_socketId;
+
+		if (args == NULL)
+		{
+			fprintf(stderr, "Failed to allocate memory for thread arguments\n");
+			exit(1);
+		}
 
 		// Getting IP address and port number of client
 		struct sockaddr_in *client_pt = (struct sockaddr_in *)&client_addr;
@@ -284,7 +283,8 @@ int main(int argc, char *argv[])
 		printf("Client is connected with port number: %d and ip address: %s \n", ntohs(client_addr.sin_port), str);
 
 		pthread_create(&tid[i], NULL, (void *(*)(void *))thread_fn, args); // Creating a thread for each client accepted
-		i++;
+
+		i = (i + 1) % MAX_CLIENTS; // Reuse old threads
 	}
 
 	// Waiting for all threads to finish before freeing 'args'
@@ -327,7 +327,11 @@ int main(int argc, char *argv[])
 
 int sendErrorMessage(int socket, int status_code)
 {
-	char str[1024];
+	char *str = malloc(4096); // Dynamically allocate buffer
+	if (!str) {
+        perror("Failed to allocate memory for error message");
+        return -1;
+    }
 	char currentTime[50];
 	time_t now = time(0);
 
@@ -375,6 +379,7 @@ int sendErrorMessage(int socket, int status_code)
 	default:
 		return -1;
 	}
+	free(str); // Free the dynamically allocated buffer for error message
 	return 1;
 }
 
@@ -523,7 +528,7 @@ int handle_request(Hashmap *map, int proxy_socket, ParsedRequest *request, char 
 
 	memset(method_http_v_buf, 0, MAX_BYTES);
 
-	bytes_send = recv(client_socket, method_http_v_buf, MAX_BYTES - 1, 0);
+	int bytes_recieved = recv(client_socket, method_http_v_buf, MAX_BYTES - 1, 0);
 
 	char *to_be_cached = (char *)malloc(sizeof(char) * MAX_BYTES);
 
@@ -574,12 +579,12 @@ int handle_request(Hashmap *map, int proxy_socket, ParsedRequest *request, char 
 
 		memset(method_http_v_buf, 0, MAX_BYTES);
 
-		bytes_send = recv(client_socket, method_http_v_buf, MAX_BYTES - 1, 0);
+		bytes_recieved = recv(client_socket, method_http_v_buf, MAX_BYTES - 1, 0);
 	}
 
-	to_be_cached[cache_index] = '\0';
+	to_be_cached[cache_index] = '\0'; // cache_index represents the size of to_be_cached
 	free(method_http_v_buf);
-	insert(map, to_be_cached, strlen(to_be_cached), storeHttpRequest);
+	insert(map, to_be_cached, cache_index, storeHttpRequest);
 	printf("Done\n");
 	free(to_be_cached);
 	method_http_v_buf = NULL;
@@ -917,7 +922,7 @@ void insert(Hashmap *map, char *data, int size, const char *key)
 	}
 
 	// If not found, insert a new node
-	int element_size = size + 1 + strlen(key) + sizeof(cache_element); // Size of the new element which will be added to the cache
+	int element_size = size + 1 + strlen(key)// Size of the new element which will be added to the cache
 	if (element_size > MAX_ELEMENT_SIZE)
 	{
 		temp_lock_val = pthread_mutex_unlock(&lock);
@@ -955,7 +960,7 @@ void insert(Hashmap *map, char *data, int size, const char *key)
 			return;
 		}
 
-		strcpy(element->data, data);
+		memcpy(element->data, data,size);
 
 		element->url = (char *)malloc(1 + (strlen(key) * sizeof(char)));
 
@@ -1062,9 +1067,9 @@ cache_element *search(Hashmap *map, const char *key)
 			node->lru_time_track = time(NULL);
 			printf("LRU Time Track After : %ld", node->lru_time_track);
 
-			// If the node is already the head of the queue no action is needed
+			// If the node is already the head of the queue no action is needed + only single elment exists
 
-			if (node != qhead)
+			if ((node != qhead) && !(qhead == qtail ))
 			{
 				// Remove the node from its current position in the queue
 				if (node->left)
@@ -1142,9 +1147,14 @@ void deleteNode(Hashmap *map)
 
 	cache_element *toDelete = qtail;
 
+	// Only one element in queue
+
+	if(qhead && qtail && (qhead == qtail)){
+		qhead = qtail = NULL;
+	}
 	// if there is more than one element in the queue
 
-	if (qtail->left)
+	else if (qtail->left)
 	{
 		qtail = qtail->left;
 		qtail->right = NULL;
@@ -1173,11 +1183,12 @@ void deleteNode(Hashmap *map)
 				map->table[index] = node->next;
 			}
 
+			cache_size -= node->len;
+			// Decrement the size of cache
+
+			free(node->data);
 			free(node->url);
 			free(node);
-
-			// Decrement the size of cache
-			cache_size -= node->len;
 
 			temp_lock_val = pthread_mutex_unlock(&lock);
 			printf("Remove Cache Lock Unlocked %d\n", temp_lock_val);
