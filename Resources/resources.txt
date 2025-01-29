@@ -17,3 +17,5 @@ Passing command line arguments to gdb : "https://stackoverflow.com/questions/612
 pthreads vs lpthreads compiler flag : "https://stackoverflow.com/questions/23250863/difference-between-pthread-and-lpthread-while-compiling"
 h_addr field in hostent VSCODE : "https://stackoverflow.com/questions/11405819/does-struct-hostent-have-a-field-h-addr"
 Multiple args passing to pthread_create : "https://stackoverflow.com/questions/16230542/passing-multiple-arguments-to-threaded-function-from-pthread-create"
+What is the use of pthread_mutex_destroy : "https://stackoverflow.com/questions/76191268/when-is-pthread-mutex-destroy-necessary"
+Use of sem_destroy : "https://stackoverflow.com/questions/26623461/what-may-happen-if-sem-destroy-is-not-invoked-on-a-semaphore-in-c"  

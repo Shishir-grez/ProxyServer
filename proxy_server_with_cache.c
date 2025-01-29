@@ -970,7 +970,7 @@ void insert(Hashmap *map, char *data, int size, const char *key)
 	}
 
 	// If not found, insert a new node
-	int element_size = size + 1 + strlen(key) + sizeof(cache_element); // Size of the new element which will be added to the cache
+	int element_size = size + 1 + strlen(key);// Size of the new element which will be added to the cache
 	if (element_size > MAX_ELEMENT_SIZE)
 	{
 		temp_lock_val = pthread_mutex_unlock(&lock);
@@ -1226,11 +1226,11 @@ void deleteNode(Hashmap *map)
 				map->table[index] = node->next;
 			}
 
-			free(node->url);
-			free(node);
-
 			// Decrement the size of cache
 			cache_size -= node->len;
+
+			free(node->url);
+			free(node);
 
 			temp_lock_val = pthread_mutex_unlock(&lock);
 			printf("Remove Cache Lock Unlocked %d\n", temp_lock_val);
