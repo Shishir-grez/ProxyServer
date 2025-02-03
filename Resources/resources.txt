@@ -18,4 +18,6 @@ pthreads vs lpthreads compiler flag : "https://stackoverflow.com/questions/23250
 h_addr field in hostent VSCODE : "https://stackoverflow.com/questions/11405819/does-struct-hostent-have-a-field-h-addr"
 Multiple args passing to pthread_create : "https://stackoverflow.com/questions/16230542/passing-multiple-arguments-to-threaded-function-from-pthread-create"
 What is the use of pthread_mutex_destroy : "https://stackoverflow.com/questions/76191268/when-is-pthread-mutex-destroy-necessary"
-Use of sem_destroy : "https://stackoverflow.com/questions/26623461/what-may-happen-if-sem-destroy-is-not-invoked-on-a-semaphore-in-c"  
+Use of sem_destroy : "https://stackoverflow.com/questions/26623461/what-may-happen-if-sem-destroy-is-not-invoked-on-a-semaphore-in-c" 
+
+Handling Partial Send and recv request : "https://stackoverflow.com/questions/1386142/handling-partial-return-from-recv-tcp-in-c" 

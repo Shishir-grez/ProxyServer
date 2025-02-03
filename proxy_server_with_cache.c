@@ -118,8 +118,6 @@ typedef struct ThreadArgs
  * @field url The URL associated with the cached data. This is the key used to store/retrieve
  *             the cached response.
  *
- * @field lru_time_track The timestamp indicating the last time this element was accessed.
- *                        Used for managing the LRU cache eviction policy.
  *
  * @field next Pointer to the next `cache_element` in the linked list. Used for handling
  *             collisions in the hash table (separate chaining).
@@ -133,7 +131,6 @@ struct cache_element
 	char *data;
 	int len;
 	char *url;
-	time_t lru_time_track;
 	struct cache_element *next;
 	struct cache_element *left;
 	struct cache_element *right;
@@ -250,7 +247,8 @@ int main(int argc, char *argv[])
 
 	int reuse = 1;
 
-	if (setsockopt(proxy_socketId, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse, sizeof(reuse)) < 0){
+	if (setsockopt(proxy_socketId, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse, sizeof(reuse)) < 0)
+	{
 		perror("setsockopt(SO_REUSEADDR) failed\n");
 		exit(1);
 	}
@@ -334,7 +332,7 @@ int main(int argc, char *argv[])
 
 		printf("Client is connected with port number: %d and ip address: %s \n", ntohs(client_addr.sin_port), str);
 
-		int ret = pthread_create(&tid[i], NULL, (void *(*)(void *))thread_fn, args); // Creating a thread for each connection 
+		int ret = pthread_create(&tid[i], NULL, (void *(*)(void *))thread_fn, args); // Creating a thread for each connection
 
 		if (ret != 0)
 		{
@@ -350,14 +348,70 @@ int main(int argc, char *argv[])
 
 		i++;
 	}
-	
-	
+
 	close(proxy_socketId);
 	freeHashMap(&map);
 	pthread_mutex_destroy(&lock);
 	sem_destroy(&semaphore);
 	printf("Cleanup complete. Exiting...\n");
 	return 0;
+}
+
+int send_all(int sockfd, const void *buf, size_t len, int flags)
+{
+	size_t total = 0;
+	ssize_t bytes_left = len;
+	const char *ptr = (const char *)buf;
+
+	while (total < len)
+	{
+		ssize_t n = send(sockfd, ptr + total, bytes_left, flags);
+		if (n == -1)
+		{
+			// If error occurs, handle it
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+			{
+				// Retry on non-blocking socket error
+				continue;
+			}
+			perror("send");
+			return -1; // Handle other send errors
+		}
+		total += n;
+		bytes_left -= n;
+	}
+	return total;
+}
+
+int recv_all(int sockfd, void *buf, size_t len, int flags)
+{
+	size_t total = 0;
+	ssize_t bytes_left = len;
+	char *ptr = (char *)buf;
+
+	while (total < len)
+	{
+		ssize_t n = recv(sockfd, ptr + total, bytes_left, flags);
+		if (n == -1)
+		{
+			// If error occurs, handle it
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+			{
+				// Retry on non-blocking socket error
+				continue;
+			}
+			perror("recv");
+			return -1; // Handle other recv errors
+		}
+		else if (n == 0)
+		{
+			// Connection closed by the peer
+			break;
+		}
+		total += n;
+		bytes_left -= n;
+	}
+	return total;
 }
 
 /**
@@ -489,8 +543,8 @@ int connectToRemoteServer(char *host_addr, int port_num)
 
 	memcpy((char *)&server_addr.sin_addr.s_addr, (char *)host->h_addr, host->h_length);
 
-	// Connect to remote server, the server would have some code similar to accept for C that will be listening to clients connect request 
-	
+	// Connect to remote server, the server would have some code similar to accept for C that will be listening to clients connect request
+
 	if (connect(remoteSocket, (struct sockaddr *)&server_addr, (socklen_t)sizeof(server_addr)) < 0)
 	{
 		fprintf(stderr, "Error in connecting !\n");
@@ -525,6 +579,7 @@ int connectToRemoteServer(char *host_addr, int port_num)
 
 int handle_request(Hashmap *map, int proxy_socket, ParsedRequest *request, char *storeHttpRequest)
 {
+
 	char *method_http_v_buf = (char *)malloc(sizeof(char) * MAX_BYTES);
 
 	if (method_http_v_buf == NULL)
@@ -569,7 +624,7 @@ int handle_request(Hashmap *map, int proxy_socket, ParsedRequest *request, char 
 	if (remote_socket < 0)
 		return -1;
 
-	int bytes_send = send(remote_socket, method_http_v_buf, strlen(method_http_v_buf), 0);
+	int bytes_send = send_all(remote_socket, method_http_v_buf, strlen(method_http_v_buf), 0);
 
 	// Example of data sent : GET /path HTTP/1.1\r\nHost: example.com\r\n\r\n
 
@@ -577,7 +632,7 @@ int handle_request(Hashmap *map, int proxy_socket, ParsedRequest *request, char 
 
 	// data recieved is the actual response
 
-	bytes_send = recv(remote_socket, method_http_v_buf, MAX_BYTES - 1, 0);
+	bytes_send = recv_all(remote_socket, method_http_v_buf, MAX_BYTES - 1, 0);
 
 	char *to_be_cached = (char *)malloc(sizeof(char) * MAX_BYTES);
 
@@ -597,7 +652,7 @@ int handle_request(Hashmap *map, int proxy_socket, ParsedRequest *request, char 
 
 	while (bytes_send > 0)
 	{
-		bytes_send = send(proxy_socket, method_http_v_buf, bytes_send, 0);
+		bytes_send = send_all(proxy_socket, method_http_v_buf, bytes_send, 0);
 
 		for (int i = 0; i < (int)(bytes_send / sizeof(char)); i++)
 		{
@@ -628,7 +683,7 @@ int handle_request(Hashmap *map, int proxy_socket, ParsedRequest *request, char 
 
 		memset(method_http_v_buf, 0, MAX_BYTES);
 
-		bytes_send = recv(remote_socket, method_http_v_buf, MAX_BYTES - 1, 0);
+		bytes_send = recv_all(remote_socket, method_http_v_buf, MAX_BYTES - 1, 0);
 	}
 
 	to_be_cached[cache_index] = '\0';
@@ -738,6 +793,7 @@ void *thread_fn(void *arg)
 
 	// Proxy recieves client request here
 	// "https://stackoverflow.com/questions/14926062/detecting-end-of-http-header-with-r-n-r-n"
+
 	while (bytes_send_client > 0)
 	{
 		len = strlen(temp_http_req);
@@ -953,7 +1009,7 @@ void insert(Hashmap *map, char *data, int size, const char *key)
 	unsigned int index = hash(key);
 
 	int temp_lock_val = pthread_mutex_lock(&lock);
-	printf("Add Cache Lock Acquired %d\n", temp_lock_val);
+	printf("Mutex Lock Acquired %d\n", temp_lock_val);
 
 	cache_element *existingNode = map->table[index];
 
@@ -963,18 +1019,18 @@ void insert(Hashmap *map, char *data, int size, const char *key)
 		if (strcmp(existingNode->url, key) == 0)
 		{
 			temp_lock_val = pthread_mutex_unlock(&lock);
-			printf("Already Present \nAdd Cache Lock Unlocked %d\n", temp_lock_val);
+			printf("Already Present \nMutex Lock Aquired %d\n", temp_lock_val);
 			return;
 		}
 		existingNode = existingNode->next;
 	}
 
 	// If not found, insert a new node
-	int element_size = size + 1 + strlen(key);// Size of the new element which will be added to the cache
+	int element_size = size + 1 + strlen(key); // Size of the new element which will be added to the cache
 	if (element_size > MAX_ELEMENT_SIZE)
 	{
 		temp_lock_val = pthread_mutex_unlock(&lock);
-		printf("Add Cache Lock Unlocked %d\n", temp_lock_val);
+		printf("Mutex Lock Aquired %d\n", temp_lock_val);
 		return;
 	}
 	else
@@ -990,7 +1046,7 @@ void insert(Hashmap *map, char *data, int size, const char *key)
 			fprintf(stderr, "Failed to allocate memory for new cache element\n");
 
 			temp_lock_val = pthread_mutex_unlock(&lock);
-			printf("Remove Cache Lock Unlocked %d\n", temp_lock_val);
+			printf("Mutex Lock Unlocked %d\n", temp_lock_val);
 
 			return;
 		}
@@ -1004,7 +1060,7 @@ void insert(Hashmap *map, char *data, int size, const char *key)
 			fprintf(stderr, "Failed to allocate memory for cache element's data \n");
 
 			temp_lock_val = pthread_mutex_unlock(&lock);
-			printf("Remove Cache Lock Unlocked %d\n", temp_lock_val);
+			printf("Mutex Lock Unlocked %d\n", temp_lock_val);
 			return;
 		}
 
@@ -1021,13 +1077,11 @@ void insert(Hashmap *map, char *data, int size, const char *key)
 			fprintf(stderr, "Failed to allocate memory for cache element's url \n");
 
 			temp_lock_val = pthread_mutex_unlock(&lock);
-			printf("Remove Cache Lock Unlocked %d\n", temp_lock_val);
+			printf("Mutex Lock Unlocked %d\n", temp_lock_val);
 			return;
 		}
 
 		strcpy(element->url, key);
-
-		element->lru_time_track = time(NULL); // Updating the time_track
 
 		element->len = element_size;
 		element->next = map->table[index];
@@ -1057,7 +1111,7 @@ void insert(Hashmap *map, char *data, int size, const char *key)
 		}
 
 		temp_lock_val = pthread_mutex_unlock(&lock);
-		printf("Add Cache Lock Unlocked %d\n", temp_lock_val);
+		printf("Mutex Lock Aquired %d\n", temp_lock_val);
 
 		return;
 	}
@@ -1068,8 +1122,7 @@ void insert(Hashmap *map, char *data, int size, const char *key)
  * @brief Searches for a cache element associated with a given URL in the hashmap.
  *
  * This function searches the hashmap for a cache element that corresponds to the given URL.
- * If the URL is found in the hashmap, it updates the Least Recently Used (LRU) timestamp to
- * reflect the most recent access and moves the element to the front of the LRU queue (i.e.,
+ * If the URL is found in the hashmap, it moves the element to the front of the LRU queue (i.e.,
  * the head of the queue). This function ensures the LRU cache eviction policy is followed.
  * If the URL is not found, the function returns `NULL`.
  *
@@ -1081,7 +1134,7 @@ void insert(Hashmap *map, char *data, int size, const char *key)
  * @details The function performs the following:
  *          - Computes the hash index for the given URL.
  *          - Searches through the linked list at the computed index.
- *          - If the URL is found, it updates the LRU time and moves the element to the front of the LRU queue.
+ *          - If the URL is found,  moves the element to the front of the LRU queue.
  *          - If not found, the function returns `NULL`.
  *
  * @example
@@ -1109,11 +1162,8 @@ cache_element *search(Hashmap *map, const char *key)
 
 		if (strcmp(node->url, key) == 0)
 		{
-			printf("LRU Time Track Before : %ld", node->lru_time_track);
 			printf("\nurl found\n");
 			// Updating the time_track
-			node->lru_time_track = time(NULL);
-			printf("LRU Time Track After : %ld", node->lru_time_track);
 
 			// If the node is already the head of the queue no action is needed
 
@@ -1145,7 +1195,7 @@ cache_element *search(Hashmap *map, const char *key)
 				qhead = node;
 			}
 			temp_lock_val = pthread_mutex_unlock(&lock);
-			printf("Remove Cache Lock Unlocked %d\n", temp_lock_val);
+			printf("Mutex lock unlocked %d\n", temp_lock_val);
 
 			return node;
 		}
@@ -1154,7 +1204,7 @@ cache_element *search(Hashmap *map, const char *key)
 	printf("\nurl not found\n");
 
 	temp_lock_val = pthread_mutex_unlock(&lock);
-	printf("Remove Cache Lock Unlocked %d\n", temp_lock_val);
+	printf("Mutex Lock Unlocked %d\n", temp_lock_val);
 	return NULL;
 }
 
@@ -1187,7 +1237,7 @@ void deleteNode(Hashmap *map)
 	if (qtail == NULL)
 	{
 		temp_lock_val = pthread_mutex_unlock(&lock);
-		printf("Remove Cache Lock Unlocked %d\n", temp_lock_val);
+		printf("Mutex Lock Unlocked %d\n", temp_lock_val);
 		return;
 	}
 
@@ -1233,7 +1283,7 @@ void deleteNode(Hashmap *map)
 			free(node);
 
 			temp_lock_val = pthread_mutex_unlock(&lock);
-			printf("Remove Cache Lock Unlocked %d\n", temp_lock_val);
+			printf("Mutex Lock Unlocked %d\n", temp_lock_val);
 
 			return;
 		}
@@ -1241,7 +1291,7 @@ void deleteNode(Hashmap *map)
 		node = node->next;
 	}
 	temp_lock_val = pthread_mutex_unlock(&lock);
-	printf("Remove Cache Lock Unlocked %d\n", temp_lock_val);
+	printf("Mutex Lock Unlocked %d\n", temp_lock_val);
 }
 
 /**
