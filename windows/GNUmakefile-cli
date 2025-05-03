@@ -1,0 +1,36 @@
+# Makefile for Windows Proxy Server CLI using GCC/MinGW
+# Run with 'mingw32-make -f GNUmakefile-cli'
+
+CC = gcc
+CFLAGS = -Wall -O2 -D_WIN32_WINNT=0x0600 -Ilib
+LDFLAGS = -s
+LIBS = -lws2_32 -lpthread
+
+# Target executable
+PROXY = proxy_cli.exe
+
+# Source files
+SOURCES = proxy_server_with_cli.c proxy_parse.c proxy_cli.c proxy_cli_main.c proxy_cache_sqlite.c lib/sqlite3.c
+
+# Object files
+OBJECTS = $(SOURCES:.c=.o)
+
+# Build rules
+all: $(PROXY)
+
+$(PROXY): $(OBJECTS)
+	$(CC) $(LDFLAGS) -o $@ $(OBJECTS) $(LIBS)
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+clean:
+	rm -f *.o $(PROXY)
+
+# Dependencies
+proxy_server_with_cli.o: proxy_server_with_cli.c proxy_parse.h proxy_cache_sqlite.h
+proxy_parse.o: proxy_parse.c proxy_parse.h
+proxy_cli.o: proxy_cli.c proxy_cli.h
+proxy_cli_main.o: proxy_cli_main.c proxy_cli.h proxy_cache_sqlite.h
+proxy_cache_sqlite.o: proxy_cache_sqlite.c proxy_cache_sqlite.h
+lib/sqlite3.o: lib/sqlite3.c lib/sqlite3.h
